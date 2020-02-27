@@ -26,6 +26,49 @@
     #include <unistd.h>
 #endif
 
+/// Test
+
+#include "SerialClass.h"
+#include "json.hpp"
+using json = nlohmann::json;
+#include <exception>
+
+static Serial* SP = new Serial("\\\\.\\COM12");
+std::string messageFromSerialPort = "";
+std::string lastGoodMessageFromSerialPort = "";
+bool isStartRecieved = false;
+json lastJson = NULL;
+
+
+void getDataFromSerialPort(char res)
+{
+	if (res == '{' && isStartRecieved == false)
+	{
+		isStartRecieved = true;
+		messageFromSerialPort += res;
+	}
+	else if (res == '}' && isStartRecieved == true)
+	{
+		messageFromSerialPort += res;
+		lastGoodMessageFromSerialPort = messageFromSerialPort.c_str();
+		//printf("%s\n", lastGoodMessageFromSerialPort.c_str());
+
+		messageFromSerialPort.clear();
+		isStartRecieved = false;
+	}
+	else if (res == '{' && isStartRecieved == true)
+	{
+		messageFromSerialPort += res;
+		messageFromSerialPort.clear();
+		isStartRecieved = false;
+	}
+	else if (isStartRecieved == true)
+		messageFromSerialPort += res;
+}
+
+
+///
+
 //==================================================================================================
 // Macros
 //==================================================================================================
@@ -2058,27 +2101,27 @@ CPSMoveControllerLatest::CPSMoveControllerLatest(
                 
                 if ((int)psmControllerId % 2 == 0)
                 {
-                    hand= vr::TrackedControllerRole_RightHand;
+                    //hand= vr::TrackedControllerRole_RightHand;
 
 			        pSettings->GetString("virtual_controller_ik", "first_hand", handString, 16, &fetchError);
 			        if (fetchError == vr::VRSettingsError_None)
                     {
                         if (strcasecmp(handString, "left") == 0)
                         {
-                            hand= vr::TrackedControllerRole_LeftHand;
+                            //hand= vr::TrackedControllerRole_LeftHand;
                         }
                     }
                 }
                 else
                 {
-                    hand= vr::TrackedControllerRole_LeftHand;
+                    //hand= vr::TrackedControllerRole_LeftHand;
 
 			        pSettings->GetString("virtual_controller_ik", "second_hand", handString, 16, &fetchError);
 			        if (fetchError == vr::VRSettingsError_None)
                     {
                         if (strcasecmp(handString, "right") == 0)
                         {
-                            hand= vr::TrackedControllerRole_RightHand;
+                            //hand= vr::TrackedControllerRole_RightHand;
                         }
                     }
                 }
@@ -2346,20 +2389,21 @@ vr::EVRInitError CPSMoveControllerLatest::Activate(vr::TrackedDeviceIndex_t unOb
 			properties->SetBoolProperty(m_ulPropertyContainer, vr::Prop_DeviceIsWireless_Bool, true);
 			properties->SetBoolProperty(m_ulPropertyContainer, vr::Prop_DeviceProvidesBatteryStatus_Bool, m_PSMControllerType == PSMController_Move);
 
-			properties->SetInt32Property(m_ulPropertyContainer, vr::Prop_DeviceClass_Int32, vr::TrackedDeviceClass_Controller);
+			properties->SetInt32Property(m_ulPropertyContainer, vr::Prop_DeviceClass_Int32, vr::TrackedDeviceClass_GenericTracker);
 			// We are reporting a "trackpad" type axis for better compatibility with Vive games
 			properties->SetInt32Property(m_ulPropertyContainer, vr::Prop_Axis0Type_Int32, vr::k_eControllerAxis_TrackPad);
 			properties->SetInt32Property(m_ulPropertyContainer, vr::Prop_Axis1Type_Int32, vr::k_eControllerAxis_Trigger);
+			properties->SetInt32Property(m_ulPropertyContainer, vr::Prop_ControllerRoleHint_Int32, vr::TrackedControllerRole_Invalid);
 
-			switch (m_psmControllerHand)
-			{
-			case PSMControllerHand_Left:
-				properties->SetInt32Property(m_ulPropertyContainer, vr::Prop_ControllerRoleHint_Int32, vr::TrackedControllerRole_LeftHand);
-				break;
-			case PSMControllerHand_Right:
-				properties->SetInt32Property(m_ulPropertyContainer, vr::Prop_ControllerRoleHint_Int32, vr::TrackedControllerRole_RightHand);
-				break;
-			}
+			//switch (m_psmControllerHand)
+			//{
+			//case PSMControllerHand_Left:
+			//	properties->SetInt32Property(m_ulPropertyContainer, vr::Prop_ControllerRoleHint_Int32, vr::TrackedControllerRole_LeftHand);
+			//	break;
+			//case PSMControllerHand_Right:
+			//	properties->SetInt32Property(m_ulPropertyContainer, vr::Prop_ControllerRoleHint_Int32, vr::TrackedControllerRole_RightHand);
+			//	break;
+			//}
 
 			uint64_t ulRetVal= 0;
 			for (int buttonIndex = 0; buttonIndex < static_cast<int>(k_EPSButtonID_Count); ++buttonIndex)
@@ -3526,26 +3570,91 @@ void CPSMoveControllerLatest::UpdateTrackingState()
             // Compute the orientation of the controller
             PSMQuatf orientation = view.Pose.Orientation;
 
-            if (m_orientationSolver != nullptr)
-            {
-                vr::TrackedDeviceIndex_t hmd_device_index= vr::k_unTrackedDeviceIndexInvalid;
+            //if (m_orientationSolver != nullptr)
+            //{
+            //    vr::TrackedDeviceIndex_t hmd_device_index= vr::k_unTrackedDeviceIndexInvalid;
 
-                if (GetHMDDeviceIndex(&hmd_device_index))
-                {
-                    PSMPosef openvr_hmd_pose_meters;
+            //    if (GetHMDDeviceIndex(&hmd_device_index))
+            //    {
+            //        PSMPosef openvr_hmd_pose_meters;
 
-                    if (GetTrackedDevicePose(hmd_device_index, &openvr_hmd_pose_meters))
-                    {
-                        // Convert the HMD pose that's in OpenVR tracking space into PSM tracking space.
-                        // The HMD alignment calibration already gave us the tracking space conversion.
-                        const PSMPosef psmToOpenVRPose= GetWorldFromDriverPose();
-                        const PSMPosef openVRToPsmPose= PSM_PosefInverse(&psmToOpenVRPose);
-                        PSMPosef psm_hmd_pose_meters= PSM_PosefConcat(&openvr_hmd_pose_meters, &openVRToPsmPose);
-                        
-                        orientation= m_orientationSolver->solveHandOrientation(psm_hmd_pose_meters, psm_hand_position_meters);
-                    }
-                }
-            }
+            //        if (GetTrackedDevicePose(hmd_device_index, &openvr_hmd_pose_meters))
+            //        {
+            //            // Convert the HMD pose that's in OpenVR tracking space into PSM tracking space.
+            //            // The HMD alignment calibration already gave us the tracking space conversion.
+            //            const PSMPosef psmToOpenVRPose= GetWorldFromDriverPose();
+            //            const PSMPosef openVRToPsmPose= PSM_PosefInverse(&psmToOpenVRPose);
+            //            PSMPosef psm_hmd_pose_meters= PSM_PosefConcat(&openvr_hmd_pose_meters, &openVRToPsmPose);
+            //            
+            //            orientation= m_orientationSolver->solveHandOrientation(psm_hmd_pose_meters, psm_hand_position_meters);
+            //        }
+            //    }
+            //}
+
+			//TEST serial data read
+
+			if (SP->IsConnected())
+			{
+				char incomingData[256] = "";
+				int dataLength = 255;
+				int readResult = 0;
+				//while (SP->IsConnected())
+				//{
+				readResult = SP->ReadData(incomingData, dataLength);
+				// printf("Bytes read: (0 means no data available) %i\n",readResult);
+				incomingData[readResult] = 0;
+
+				for each (char var in incomingData)
+				{
+					getDataFromSerialPort(var);
+				}
+			}
+
+			//if (incomingData[0] == '{')
+			if (lastGoodMessageFromSerialPort != "")
+			{
+				json j_string = NULL;
+
+				//char* chars_array = strtok(incomingData, "\n");
+				//while (chars_array)
+				//{
+				try
+				{
+					j_string = json::parse(lastGoodMessageFromSerialPort);
+				}
+				catch (std::exception& e)
+				{
+					j_string = lastJson;
+				}
+				//chars_array = strtok(NULL, "\n");
+
+				if (j_string == NULL)
+					j_string = lastJson;
+
+				if (j_string != NULL)
+				{
+					auto qx = j_string["QX"].get<float>();
+					auto qy = j_string["QY"].get<float>();
+					auto qz = j_string["QZ"].get<float>();
+					auto qw = j_string["QW"].get<float>();
+
+					//PSMVector3f eulerWithOrientation = { roll, pitch, yaw };
+					//PSMQuatf quaternionWithOrientation = PSM_QuatfCreateFromAngles(&eulerWithOrientation);
+
+					PSMQuatf orientationFromQuaternion = PSM_QuatfCreate(qx, qy, qz, qw);
+					orientation = PSM_QuatfNormalizeWithDefault(&orientationFromQuaternion, k_psm_quaternion_identity);
+					lastJson = j_string;
+					//orientation = PSM_QuatfNormalizeWithDefault(&quaternionWithOrientation, k_psm_quaternion_identity);
+				}
+				//}
+
+				//break;
+				//}
+
+				//Sleep(500);
+			}
+
+			//END Test
 
             // Set rotational coordinates
             m_Pose.qRotation.w = m_fVirtuallyRotateController ? -orientation.w : orientation.w;
