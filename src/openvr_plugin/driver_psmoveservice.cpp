@@ -38,7 +38,7 @@ std::string messageFromSerialPort = "";
 std::string lastGoodMessageFromSerialPort = "";
 bool isStartRecieved = false;
 json lastJson = NULL;
-
+PSMQuatf hmdAlignOrientation = *k_psm_quaternion_identity;
 
 void getDataFromSerialPort(char res)
 {
@@ -3270,6 +3270,8 @@ void CPSMoveControllerLatest::RealignHMDTrackingSpace()
         return;
     }
 
+	hmdAlignOrientation = hmd_pose_meters.Orientation;
+
 	// Make the HMD orientation only contain a yaw
 	hmd_pose_meters.Orientation = ExtractHMDYawQuaternion(hmd_pose_meters.Orientation);
 	DriverLog("hmd_pose_meters(yaw-only): %s \n", PSMPosefToString(hmd_pose_meters).c_str());
@@ -3421,7 +3423,6 @@ void CPSMoveControllerLatest::UpdateTrackingState()
 
 					PSMVector3f local_forward = {0, -1, 0};
 					PSMVector3f global_forward = PSM_QuatfRotateVector(&orientation, &local_forward);
-
 					shift = PSM_Vector3fScaleAndAdd(&global_forward, m_fVirtuallExtendControllersYMeters, &shift);
 				}
 
@@ -3641,7 +3642,13 @@ void CPSMoveControllerLatest::UpdateTrackingState()
 					//PSMVector3f eulerWithOrientation = { roll, pitch, yaw };
 					//PSMQuatf quaternionWithOrientation = PSM_QuatfCreateFromAngles(&eulerWithOrientation);
 
-					PSMQuatf orientationFromQuaternion = PSM_QuatfCreate(qx, qy, qz, qw);
+					PSMQuatf orientationFromQuaternion = PSM_QuatfCreate(qw, qy, qz, qx);
+					//PSM_QuatfRotateVector
+					//PSMVector3f anglesOffset = { 0, 0, 0 };
+					//PSMQuatf xAngleOffset = PSM_QuatfCreateFromAngles(&anglesOffset);
+					//PSMQuatf orientationFromQuaternionWithOffset = PSM_QuatfMultiply(&orientationFromQuaternion, &xAngleOffset);
+					//PSMQuatf orientationWithHmdAlignOffset = PSM_QuatfMultiply(&orientationFromQuaternionWithOffset, &hmdAlignOrientation);
+
 					orientation = PSM_QuatfNormalizeWithDefault(&orientationFromQuaternion, k_psm_quaternion_identity);
 					lastJson = j_string;
 					//orientation = PSM_QuatfNormalizeWithDefault(&quaternionWithOrientation, k_psm_quaternion_identity);
