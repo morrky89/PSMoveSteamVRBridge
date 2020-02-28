@@ -39,6 +39,7 @@ std::string lastGoodMessageFromSerialPort = "";
 bool isStartRecieved = false;
 json lastJson = NULL;
 PSMQuatf hmdAlignOrientation = *k_psm_quaternion_identity;
+PSMQuatf alignOrientationForMPU = *k_psm_quaternion_identity;
 
 void getDataFromSerialPort(char res)
 {
@@ -3270,12 +3271,22 @@ void CPSMoveControllerLatest::RealignHMDTrackingSpace()
         return;
     }
 
-	hmdAlignOrientation = hmd_pose_meters.Orientation;
+
+	/*const PSMPosef psmToOpenVRPose= GetWorldFromDriverPose();
+	const PSMPosef openVRToPsmPose= PSM_PosefInverse(&psmToOpenVRPose);
+	PSMPosef psm_hmd_pose_meters= PSM_PosefConcat(&hmd_pose_meters, &openVRToPsmPose);*/
+	hmdAlignOrientation = PSM_QuatfCreate(
+		hmd_pose_meters.Orientation.w,
+		hmd_pose_meters.Orientation.x,
+		hmd_pose_meters.Orientation.y,
+		hmd_pose_meters.Orientation.z);
+
+	alignOrientationForMPU = *k_psm_quaternion_identity;
 
 	// Make the HMD orientation only contain a yaw
 	hmd_pose_meters.Orientation = ExtractHMDYawQuaternion(hmd_pose_meters.Orientation);
 	DriverLog("hmd_pose_meters(yaw-only): %s \n", PSMPosefToString(hmd_pose_meters).c_str());
-
+	//hmdAlignOrientation = hmd_pose_meters.Orientation;
 	// We have the transform of the HMD in world space. 
 	// However the HMD and the controller aren't quite aligned depending on the controller type:
 	PSMQuatf controllerOrientationInHmdSpaceQuat= *k_psm_quaternion_identity;
@@ -3644,12 +3655,30 @@ void CPSMoveControllerLatest::UpdateTrackingState()
 
 					PSMQuatf orientationFromQuaternion = PSM_QuatfCreate(qw, qy, qz, qx);
 					//PSM_QuatfRotateVector
-					//PSMVector3f anglesOffset = { 0, 0, 0 };
+					//PSMVector3f anglesOffset = { 0, -90, 0 };
 					//PSMQuatf xAngleOffset = PSM_QuatfCreateFromAngles(&anglesOffset);
 					//PSMQuatf orientationFromQuaternionWithOffset = PSM_QuatfMultiply(&orientationFromQuaternion, &xAngleOffset);
-					//PSMQuatf orientationWithHmdAlignOffset = PSM_QuatfMultiply(&orientationFromQuaternionWithOffset, &hmdAlignOrientation);
+					//PSMQuatf viewOrientationInverse = PSM_QuatfConjugate(&hmdAlignOrientation);
 
-					orientation = PSM_QuatfNormalizeWithDefault(&orientationFromQuaternion, k_psm_quaternion_identity);
+					//PSMQuatf orientationWithHmdAlignOffset = PSM_QuatfMultiply(&orientationFromQuaternion, &viewOrientationInverse);
+					//PSMQuatf orientationFromQuaternionWithOffset = PSM_QuatfMultiply(&orientationWithHmdAlignOffset, &xAngleOffset);
+
+					if (alignOrientationForMPU.w == 1 && alignOrientationForMPU.x == 0
+						&& alignOrientationForMPU.y == 0 && alignOrientationForMPU.z == 0
+						&& hmdAlignOrientation.w != 1 && hmdAlignOrientation.x != 0
+						&& hmdAlignOrientation.y != 0 && hmdAlignOrientation.z != 0)
+					{
+						alignOrientationForMPU = PSM_QuatfNormalizeWithDefault(&PSM_QuatfCreate(
+							orientationFromQuaternion.w,
+							orientationFromQuaternion.x,
+							orientationFromQuaternion.y,
+							orientationFromQuaternion.z), k_psm_quaternion_identity);
+
+					}
+
+					PSMQuatf diff = PSM_QuatfMultiply(&hmdAlignOrientation, &PSM_QuatfConjugate(&alignOrientationForMPU));
+					PSMQuatf orientationWithOffset = PSM_QuatfMultiply(&diff, &orientationFromQuaternion);
+					orientation = PSM_QuatfNormalizeWithDefault(&orientationWithOffset, k_psm_quaternion_identity);
 					lastJson = j_string;
 					//orientation = PSM_QuatfNormalizeWithDefault(&quaternionWithOrientation, k_psm_quaternion_identity);
 				}
