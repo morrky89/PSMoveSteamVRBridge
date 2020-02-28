@@ -3271,10 +3271,6 @@ void CPSMoveControllerLatest::RealignHMDTrackingSpace()
         return;
     }
 
-
-	/*const PSMPosef psmToOpenVRPose= GetWorldFromDriverPose();
-	const PSMPosef openVRToPsmPose= PSM_PosefInverse(&psmToOpenVRPose);
-	PSMPosef psm_hmd_pose_meters= PSM_PosefConcat(&hmd_pose_meters, &openVRToPsmPose);*/
 	hmdAlignOrientation = PSM_QuatfCreate(
 		hmd_pose_meters.Orientation.w,
 		hmd_pose_meters.Orientation.x,
@@ -3286,7 +3282,7 @@ void CPSMoveControllerLatest::RealignHMDTrackingSpace()
 	// Make the HMD orientation only contain a yaw
 	hmd_pose_meters.Orientation = ExtractHMDYawQuaternion(hmd_pose_meters.Orientation);
 	DriverLog("hmd_pose_meters(yaw-only): %s \n", PSMPosefToString(hmd_pose_meters).c_str());
-	//hmdAlignOrientation = hmd_pose_meters.Orientation;
+
 	// We have the transform of the HMD in world space. 
 	// However the HMD and the controller aren't quite aligned depending on the controller type:
 	PSMQuatf controllerOrientationInHmdSpaceQuat= *k_psm_quaternion_identity;
@@ -3605,91 +3601,74 @@ void CPSMoveControllerLatest::UpdateTrackingState()
 
 			//TEST serial data read
 
-			if (SP->IsConnected())
+			if (getPSMControllerSerialNo() == "VIRTUALCONTROLLER_")
 			{
-				char incomingData[256] = "";
-				int dataLength = 255;
-				int readResult = 0;
-				//while (SP->IsConnected())
-				//{
-				readResult = SP->ReadData(incomingData, dataLength);
-				// printf("Bytes read: (0 means no data available) %i\n",readResult);
-				incomingData[readResult] = 0;
-
-				for each (char var in incomingData)
+				if (SP->IsConnected())
 				{
-					getDataFromSerialPort(var);
-				}
-			}
+					char incomingData[256] = "";
+					int dataLength = 255;
+					int readResult = 0;
 
-			//if (incomingData[0] == '{')
-			if (lastGoodMessageFromSerialPort != "")
-			{
-				json j_string = NULL;
+					readResult = SP->ReadData(incomingData, dataLength);
+					incomingData[readResult] = 0;
 
-				//char* chars_array = strtok(incomingData, "\n");
-				//while (chars_array)
-				//{
-				try
-				{
-					j_string = json::parse(lastGoodMessageFromSerialPort);
-				}
-				catch (std::exception& e)
-				{
-					j_string = lastJson;
-				}
-				//chars_array = strtok(NULL, "\n");
-
-				if (j_string == NULL)
-					j_string = lastJson;
-
-				if (j_string != NULL)
-				{
-					auto qx = j_string["QX"].get<float>();
-					auto qy = j_string["QY"].get<float>();
-					auto qz = j_string["QZ"].get<float>();
-					auto qw = j_string["QW"].get<float>();
-
-					//PSMVector3f eulerWithOrientation = { roll, pitch, yaw };
-					//PSMQuatf quaternionWithOrientation = PSM_QuatfCreateFromAngles(&eulerWithOrientation);
-
-					PSMQuatf orientationFromQuaternion = PSM_QuatfCreate(qw, qy, qz, qx);
-					//PSM_QuatfRotateVector
-					//PSMVector3f anglesOffset = { 0, -90, 0 };
-					//PSMQuatf xAngleOffset = PSM_QuatfCreateFromAngles(&anglesOffset);
-					//PSMQuatf orientationFromQuaternionWithOffset = PSM_QuatfMultiply(&orientationFromQuaternion, &xAngleOffset);
-					//PSMQuatf viewOrientationInverse = PSM_QuatfConjugate(&hmdAlignOrientation);
-
-					//PSMQuatf orientationWithHmdAlignOffset = PSM_QuatfMultiply(&orientationFromQuaternion, &viewOrientationInverse);
-					//PSMQuatf orientationFromQuaternionWithOffset = PSM_QuatfMultiply(&orientationWithHmdAlignOffset, &xAngleOffset);
-
-					if (alignOrientationForMPU.w == 1 && alignOrientationForMPU.x == 0
-						&& alignOrientationForMPU.y == 0 && alignOrientationForMPU.z == 0
-						&& hmdAlignOrientation.w != 1 && hmdAlignOrientation.x != 0
-						&& hmdAlignOrientation.y != 0 && hmdAlignOrientation.z != 0)
+					for each (char var in incomingData)
 					{
-						alignOrientationForMPU = PSM_QuatfNormalizeWithDefault(&PSM_QuatfCreate(
-							orientationFromQuaternion.w,
-							orientationFromQuaternion.x,
-							orientationFromQuaternion.y,
-							orientationFromQuaternion.z), k_psm_quaternion_identity);
+						getDataFromSerialPort(var);
+					}
+				}
 
+				if (lastGoodMessageFromSerialPort != "")
+				{
+					json j_string = NULL;
+
+					try
+					{
+						j_string = json::parse(lastGoodMessageFromSerialPort);
+					}
+					catch (std::exception& e)
+					{
+						j_string = lastJson;
 					}
 
-					PSMQuatf diff = PSM_QuatfMultiply(&hmdAlignOrientation, &PSM_QuatfConjugate(&alignOrientationForMPU));
-					PSMQuatf orientationWithOffset = PSM_QuatfMultiply(&diff, &orientationFromQuaternion);
-					orientation = PSM_QuatfNormalizeWithDefault(&orientationWithOffset, k_psm_quaternion_identity);
-					lastJson = j_string;
-					//orientation = PSM_QuatfNormalizeWithDefault(&quaternionWithOrientation, k_psm_quaternion_identity);
+					if (j_string == NULL)
+						j_string = lastJson;
+
+					if (j_string != NULL)
+					{
+						auto qx = j_string["QX"].get<float>();
+						auto qy = j_string["QY"].get<float>();
+						auto qz = j_string["QZ"].get<float>();
+						auto qw = j_string["QW"].get<float>();
+
+						//PSMVector3f eulerWithOrientation = { roll, pitch, yaw };
+						//PSMQuatf quaternionWithOrientation = PSM_QuatfCreateFromAngles(&eulerWithOrientation);
+
+						PSMQuatf orientationFromQuaternion = PSM_QuatfCreate(qw, qy, qz, qx);
+						//PSMVector3f anglesOffset = { 0, -90, 0 };
+						//PSMQuatf xAngleOffset = PSM_QuatfCreateFromAngles(&anglesOffset);
+						//PSMQuatf orientationFromQuaternionWithOffset = PSM_QuatfMultiply(&orientationFromQuaternion, &xAngleOffset);
+
+						if (alignOrientationForMPU.w == 1 && alignOrientationForMPU.x == 0
+							&& alignOrientationForMPU.y == 0 && alignOrientationForMPU.z == 0
+							&& hmdAlignOrientation.w != 1 && hmdAlignOrientation.x != 0
+							&& hmdAlignOrientation.y != 0 && hmdAlignOrientation.z != 0)
+						{
+							alignOrientationForMPU = PSM_QuatfNormalizeWithDefault(&PSM_QuatfCreate(
+								orientationFromQuaternion.w,
+								orientationFromQuaternion.x,
+								orientationFromQuaternion.y,
+								orientationFromQuaternion.z), k_psm_quaternion_identity);
+						}
+
+						PSMQuatf differenceBetweenHmdAndAlignMPU = PSM_QuatfMultiply(&hmdAlignOrientation, &PSM_QuatfConjugate(&alignOrientationForMPU));
+						PSMQuatf orientationWithOffset = PSM_QuatfMultiply(&differenceBetweenHmdAndAlignMPU, &orientationFromQuaternion);
+						orientation = PSM_QuatfNormalizeWithDefault(&orientationWithOffset, k_psm_quaternion_identity);
+						lastJson = j_string;
+						//orientation = PSM_QuatfNormalizeWithDefault(&quaternionWithOrientation, k_psm_quaternion_identity);
+					}
 				}
-				//}
-
-				//break;
-				//}
-
-				//Sleep(500);
 			}
-
 			//END Test
 
             // Set rotational coordinates
