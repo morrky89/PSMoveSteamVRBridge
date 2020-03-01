@@ -26,61 +26,6 @@
     #include <unistd.h>
 #endif
 
-/// Test
-
-#include "SerialClass.h"
-#include "json.hpp"
-using json = nlohmann::json;
-#include <exception>
-
-static Serial* SP = new Serial("\\\\.\\COM5"); //COM4 - my bluetooth COM
-std::string messageFromSerialPort = "";
-std::string lastGoodMessageFromSerialPort = "";
-bool isStartRecieved = false;
-json lastJson = NULL;
-PSMQuatf hmdAlignOrientation = *k_psm_quaternion_identity;
-PSMQuatf alignOrientationForMPU = *k_psm_quaternion_identity;
-char atCommand[4] = "AT";
-
-void getDataFromSerialPort(char res)
-{
-	if (res == '\0')
-		return;
-
-	if (res == '{' && isStartRecieved == false)
-	{
-		messageFromSerialPort = "";
-		messageFromSerialPort.clear();
-		isStartRecieved = true;
-		messageFromSerialPort += res;
-	}
-	else if (res == '}' && isStartRecieved == true)
-	{
-		messageFromSerialPort += res;
-		lastGoodMessageFromSerialPort.clear();
-		//lastGoodMessageFromSerialPort = messageFromSerialPort.c_str();
-		//printf("%s\n", lastGoodMessageFromSerialPort.c_str());
-		for (int i = 0; i < messageFromSerialPort.size(); i++)
-			lastGoodMessageFromSerialPort.push_back(messageFromSerialPort[i]);
-
-		//lastGoodMessageFromSerialPort = "";
-		messageFromSerialPort.clear();
-		isStartRecieved = false;
-	}
-	else if (res == '{' && isStartRecieved == true)
-	{
-		//lastGoodMessageFromSerialPort = "";
-		messageFromSerialPort.clear();
-		messageFromSerialPort += res;
-		//isStartRecieved = false;
-	}
-	else if (isStartRecieved == true)
-		messageFromSerialPort += res;
-}
-
-
-///
-
 //==================================================================================================
 // Macros
 //==================================================================================================
@@ -1882,6 +1827,9 @@ CPSMoveControllerLatest::CPSMoveControllerLatest(
     , m_hmdAlignPSButtonID(k_EPSButtonID_Select)
     , m_overrideModel("")
     , m_orientationSolver(nullptr)
+	, hmdAlignOrientation(*k_psm_quaternion_identity)
+	, alignOrientationForMPU(*k_psm_quaternion_identity)
+	, useOnlyYawForVirutalTrackerWithHMDOrientation(false)
 {
     char svrIdentifier[256];
     GenerateControllerSteamVRIdentifier(svrIdentifier, sizeof(svrIdentifier), psmControllerId);
@@ -2031,60 +1979,60 @@ CPSMoveControllerLatest::CPSMoveControllerLatest(
 		else if (psmControllerType == PSMController_Virtual)
 		{
 			// Controller button mappings
-            for (int button_index = 0; button_index < k_EPSButtonID_Count; ++button_index)
-            {
-			    LoadButtonMapping(
-                    pSettings, 
-                    k_EPSControllerType_Virtual, 
-                    (CPSMoveControllerLatest::ePSButtonID)button_index, 
-                    (vr::EVRButtonId)button_index, 
-                    k_EVRTouchpadDirection_None, 
-                    psmControllerId);
-            }
+			for (int button_index = 0; button_index < k_EPSButtonID_Count; ++button_index)
+			{
+				LoadButtonMapping(
+					pSettings,
+					k_EPSControllerType_Virtual,
+					(CPSMoveControllerLatest::ePSButtonID)button_index,
+					(vr::EVRButtonId)button_index,
+					k_EVRTouchpadDirection_None,
+					psmControllerId);
+			}
 
 			// Axis mapping
-            m_virtualTriggerAxisIndex = LoadInt(pSettings, "virtual_axis", "trigger_axis_index", -1);
-            m_virtualTouchpadXAxisIndex = LoadInt(pSettings, "virtual_axis", "touchpad_x_axis_index", -1);
-            m_virtualTouchpadYAxisIndex = LoadInt(pSettings, "virtual_axis", "touchpad_y_axis_index", -1);
+			m_virtualTriggerAxisIndex = LoadInt(pSettings, "virtual_axis", "trigger_axis_index", -1);
+			m_virtualTouchpadXAxisIndex = LoadInt(pSettings, "virtual_axis", "touchpad_x_axis_index", -1);
+			m_virtualTouchpadYAxisIndex = LoadInt(pSettings, "virtual_axis", "touchpad_y_axis_index", -1);
 
-            // HMD align button mapping
-            {
-			    char alignButtonString[32];
-			    vr::EVRSettingsError fetchError;
+			// HMD align button mapping
+			{
+				char alignButtonString[32];
+				vr::EVRSettingsError fetchError;
 
-                m_hmdAlignPSButtonID= k_EPSButtonID_0;
-			    pSettings->GetString("virtual_controller", "hmd_align_button", alignButtonString, 32, &fetchError);
+				m_hmdAlignPSButtonID = k_EPSButtonID_0;
+				pSettings->GetString("virtual_controller", "hmd_align_button", alignButtonString, 32, &fetchError);
 
-			    if (fetchError == vr::VRSettingsError_None)
-                {
-                    int button_index= find_index_of_string_in_table(k_VirtualButtonNames, CPSMoveControllerLatest::k_EPSButtonID_Count, alignButtonString);
-                    if (button_index != -1)
-                    {
-                        m_hmdAlignPSButtonID= static_cast<CPSMoveControllerLatest::ePSButtonID>(button_index);
-                    }
-                    else
-                    {
-                        DriverLog("Invalid virtual controller hmd align button: %s\n", alignButtonString);
-                    }
-                }
-            }
+				if (fetchError == vr::VRSettingsError_None)
+				{
+					int button_index = find_index_of_string_in_table(k_VirtualButtonNames, CPSMoveControllerLatest::k_EPSButtonID_Count, alignButtonString);
+					if (button_index != -1)
+					{
+						m_hmdAlignPSButtonID = static_cast<CPSMoveControllerLatest::ePSButtonID>(button_index);
+					}
+					else
+					{
+						DriverLog("Invalid virtual controller hmd align button: %s\n", alignButtonString);
+					}
+				}
+			}
 
-            // Get the controller override model to use, if any
-            {
-			    char modelString[64];
-			    vr::EVRSettingsError fetchError;
+			// Get the controller override model to use, if any
+			{
+				char modelString[64];
+				vr::EVRSettingsError fetchError;
 
-			    pSettings->GetString("virtual_controller", "override_model", modelString, 64, &fetchError);
-			    if (fetchError == vr::VRSettingsError_None)
-                {
-                    m_overrideModel= modelString;
-                }
-            }
+				pSettings->GetString("virtual_controller", "override_model", modelString, 64, &fetchError);
+				if (fetchError == vr::VRSettingsError_None)
+				{
+					m_overrideModel = modelString;
+				}
+			}
 
 			// Touch pad settings
-			m_bUseSpatialOffsetAfterTouchpadPressAsTouchpadAxis= 
+			m_bUseSpatialOffsetAfterTouchpadPressAsTouchpadAxis =
 				LoadBool(pSettings, "virtual_controller", "use_spatial_offset_after_touchpad_press_as_touchpad_axis", false);
-			m_fMetersPerTouchpadAxisUnits= 
+			m_fMetersPerTouchpadAxisUnits =
 				LoadFloat(pSettings, "virtual_controller", "meters_per_touchpad_units", .075f);
 
 			// Throwing power settings
@@ -2094,64 +2042,83 @@ CPSMoveControllerLatest::CPSMoveControllerLatest(
 				LoadFloat(pSettings, "virtual_controller_settings", "linear_velocity_exponent", 0.f);
 
 			// General Settings
-            m_bDisableHMDAlignmentGesture= LoadBool(pSettings, "virtual_controller_settings", "disable_alignment_gesture", false);
+			m_bDisableHMDAlignmentGesture = LoadBool(pSettings, "virtual_controller_settings", "disable_alignment_gesture", false);
 			m_fVirtuallExtendControllersYMeters = LoadFloat(pSettings, "virtual_controller_settings", "psmove_extend_y", 0.0f);
 			m_fVirtuallExtendControllersZMeters = LoadFloat(pSettings, "virtual_controller_settings", "psmove_extend_z", 0.0f);
-			m_fControllerMetersInFrontOfHmdAtCalibration= 
+			m_fControllerMetersInFrontOfHmdAtCalibration =
 				LoadFloat(pSettings, "virtual_controller_settings", "m_fControllerMetersInFrontOfHmdAtCallibration", 0.06f);
 
-			m_thumbstickDeadzone = 
+			m_thumbstickDeadzone =
 				fminf(fmaxf(LoadFloat(pSettings, "virtual_controller_settings", "thumbstick_deadzone_radius", k_defaultThumbstickDeadZoneRadius), 0.f), 0.99f);
-			m_bThumbstickTouchAsPress= LoadBool(pSettings, "virtual_controller_settings", "thumbstick_touch_as_press", true);
+			m_bThumbstickTouchAsPress = LoadBool(pSettings, "virtual_controller_settings", "thumbstick_touch_as_press", true);
 
-            // IK solver
-            if (LoadBool(pSettings, "virtual_controller_ik", "enable_ik", false))
-            {                
-			    char handString[16];
-			    vr::EVRSettingsError fetchError;
-                vr::ETrackedControllerRole hand;
-                
-                if ((int)psmControllerId % 2 == 0)
-                {
-                    //hand= vr::TrackedControllerRole_RightHand;
+			// IK solver
+			if (LoadBool(pSettings, "virtual_controller_ik", "enable_ik", false))
+			{
+				char handString[16];
+				vr::EVRSettingsError fetchError;
+				vr::ETrackedControllerRole hand;
 
-			        pSettings->GetString("virtual_controller_ik", "first_hand", handString, 16, &fetchError);
-			        if (fetchError == vr::VRSettingsError_None)
-                    {
-                        if (strcasecmp(handString, "left") == 0)
-                        {
-                            //hand= vr::TrackedControllerRole_LeftHand;
-                        }
-                    }
-                }
-                else
-                {
-                    //hand= vr::TrackedControllerRole_LeftHand;
+				if ((int)psmControllerId % 2 == 0)
+				{
+					//hand= vr::TrackedControllerRole_RightHand;
 
-			        pSettings->GetString("virtual_controller_ik", "second_hand", handString, 16, &fetchError);
-			        if (fetchError == vr::VRSettingsError_None)
-                    {
-                        if (strcasecmp(handString, "right") == 0)
-                        {
-                            //hand= vr::TrackedControllerRole_RightHand;
-                        }
-                    }
-                }
+					pSettings->GetString("virtual_controller_ik", "first_hand", handString, 16, &fetchError);
+					if (fetchError == vr::VRSettingsError_None)
+					{
+						if (strcasecmp(handString, "left") == 0)
+						{
+							//hand= vr::TrackedControllerRole_LeftHand;
+						}
+					}
+				}
+				else
+				{
+					//hand= vr::TrackedControllerRole_LeftHand;
 
-                float neckLength= LoadFloat(pSettings, "virtual_controller_ik", "neck_length", 0.2f); // meters
-                float halfShoulderLength= LoadFloat(pSettings, "virtual_controller_ik", "half_shoulder_length", 0.22f); // meters
-                float upperArmLength= LoadFloat(pSettings, "virtual_controller_ik", "upper_arm_length", 0.3f); // meters
-                float lowerArmLength= LoadFloat(pSettings, "virtual_controller_ik", "lower_arm_length", 0.35f); // meters
+					pSettings->GetString("virtual_controller_ik", "second_hand", handString, 16, &fetchError);
+					if (fetchError == vr::VRSettingsError_None)
+					{
+						if (strcasecmp(handString, "right") == 0)
+						{
+							//hand= vr::TrackedControllerRole_RightHand;
+						}
+					}
+				}
 
-                //TODO: Select solver method
-                //m_orientationSolver = new CFABRIKArmSolver(hand, neckLength, halfShoulderLength, upperArmLength, lowerArmLength);
-                //m_orientationSolver = new CRadialHandOrientationSolver(hand, neckLength, halfShoulderLength);
-                m_orientationSolver = new CFacingHandOrientationSolver;
-            }
-            else
-            {
-                m_orientationSolver = new CFacingHandOrientationSolver;
-            }
+				float neckLength = LoadFloat(pSettings, "virtual_controller_ik", "neck_length", 0.2f); // meters
+				float halfShoulderLength = LoadFloat(pSettings, "virtual_controller_ik", "half_shoulder_length", 0.22f); // meters
+				float upperArmLength = LoadFloat(pSettings, "virtual_controller_ik", "upper_arm_length", 0.3f); // meters
+				float lowerArmLength = LoadFloat(pSettings, "virtual_controller_ik", "lower_arm_length", 0.35f); // meters
+
+				//TODO: Select solver method
+				//m_orientationSolver = new CFABRIKArmSolver(hand, neckLength, halfShoulderLength, upperArmLength, lowerArmLength);
+				//m_orientationSolver = new CRadialHandOrientationSolver(hand, neckLength, halfShoulderLength);
+				m_orientationSolver = new CFacingHandOrientationSolver;
+			}
+			else
+			{
+				m_orientationSolver = new CFacingHandOrientationSolver;
+			}
+
+			useOnlyYawForVirutalTrackerWithHMDOrientation = LoadBool(pSettings, "virtual_controller_settings", "use_only_yaw_for_orientation_from_hmd", false);
+
+			std::string controllerFlag = "controller_" + std::to_string(m_nPSMControllerId) + "_use_serial_accelerometer";
+			useSerialAccelerometer = LoadBool(pSettings, "virtual_controller_settings", controllerFlag.c_str(), false);
+			
+			if (useSerialAccelerometer)
+			{
+				char comPort[32];
+				vr::EVRSettingsError fetchError;
+
+				std::string controllerComFlag = "controller_" + std::to_string(m_nPSMControllerId) + "_com_port";
+				pSettings->GetString("virtual_controller_settings", controllerComFlag.c_str(), comPort, 32, &fetchError);
+
+				std::string controllerBlueToothFlag = "controller_" + std::to_string(m_nPSMControllerId) + "_init_bluetooth_with_at_command";
+				float initBluetoothWithATCommand = LoadBool(pSettings, "virtual_controller_settings", controllerBlueToothFlag.c_str(), false);
+
+				serialAccelerometer = new SerialAccelerometer(comPort, initBluetoothWithATCommand);
+			}
 		}
 	}
 
@@ -3589,135 +3556,66 @@ void CPSMoveControllerLatest::UpdateTrackingState()
             // Compute the orientation of the controller
             PSMQuatf orientation = view.Pose.Orientation;
 
-            //if (m_orientationSolver != nullptr)
-            //{
-            //    vr::TrackedDeviceIndex_t hmd_device_index= vr::k_unTrackedDeviceIndexInvalid;
+            if (!useSerialAccelerometer && m_orientationSolver != nullptr)
+            {
+                vr::TrackedDeviceIndex_t hmd_device_index= vr::k_unTrackedDeviceIndexInvalid;
 
-            //    if (GetHMDDeviceIndex(&hmd_device_index))
-            //    {
-            //        PSMPosef openvr_hmd_pose_meters;
+                if (GetHMDDeviceIndex(&hmd_device_index))
+                {
+                    PSMPosef openvr_hmd_pose_meters;
 
-            //        if (GetTrackedDevicePose(hmd_device_index, &openvr_hmd_pose_meters))
-            //        {
-            //            // Convert the HMD pose that's in OpenVR tracking space into PSM tracking space.
-            //            // The HMD alignment calibration already gave us the tracking space conversion.
-            //            const PSMPosef psmToOpenVRPose= GetWorldFromDriverPose();
-            //            const PSMPosef openVRToPsmPose= PSM_PosefInverse(&psmToOpenVRPose);
-            //            PSMPosef psm_hmd_pose_meters= PSM_PosefConcat(&openvr_hmd_pose_meters, &openVRToPsmPose);
-            //            
-            //            orientation= m_orientationSolver->solveHandOrientation(psm_hmd_pose_meters, psm_hand_position_meters);
-            //        }
-            //    }
-            //}
-
-			//TEST serial data read
-
-			//if (getPSMControllerSerialNo() == "VIRTUALCONTROLLER_")
-			try
-			{
-				if (SP->IsConnected())
-				{
-					//SP->WriteData(atCommand, 4);
-
-					char incomingData[256] = "";
-					int dataLength = 255;
-					int readResult = 0;
-
-					readResult = SP->ReadData(incomingData, dataLength);
-					//std::string s = std::to_string(readResult);
-					//DriverLog(s.c_str());
-
-					if (readResult == 0)
-					{
-						char atCommand[4] = "AT";
-						SP->WriteData(atCommand, 4);
-					}
-
-					incomingData[readResult] = 0;
-
-					for each (char var in incomingData)
-					{
-						getDataFromSerialPort(var);
-					}
-				}
-				else
-				{
-					try
-					{
-						DriverLog("COM not connected");
-						SP = new Serial("\\\\.\\COM5");
-					}
-					catch (std::exception& e)
-					{
-						DriverLog("Error COM connecting");
-					}
-				}
-
-				if (lastGoodMessageFromSerialPort.length() > 1)
-				{
-					json j_string = NULL;
-
-					try
-					{
-						j_string = json::parse(lastGoodMessageFromSerialPort.c_str());
-						//DriverLog(lastGoodMessageFromSerialPort.c_str());
-					}
-					catch (std::exception& e)
-					{
-						j_string = lastJson;
-					}
-
-					if (j_string == NULL)
-						j_string = lastJson;
-
-					if (j_string != NULL)
-					{
-						auto qx = j_string["QX"].get<float>();
-						auto qy = j_string["QY"].get<float>();
-						auto qz = j_string["QZ"].get<float>();
-						auto qw = j_string["QW"].get<float>();
-
-						//PSMVector3f eulerWithOrientation = { roll, pitch, yaw };
-						//PSMQuatf quaternionWithOrientation = PSM_QuatfCreateFromAngles(&eulerWithOrientation);
-
-						PSMQuatf orientationFromQuaternion = PSM_QuatfCreate(qw, qy, qz, qx);
-						//PSMVector3f anglesOffset = { 0, -90, 0 };
-						//PSMQuatf xAngleOffset = PSM_QuatfCreateFromAngles(&anglesOffset);
-						//PSMQuatf orientationFromQuaternionWithOffset = PSM_QuatfMultiply(&orientationFromQuaternion, &xAngleOffset);
-
-						if (alignOrientationForMPU.w == 1 && alignOrientationForMPU.x == 0
-							&& alignOrientationForMPU.y == 0 && alignOrientationForMPU.z == 0
-							&& hmdAlignOrientation.w != 1 && hmdAlignOrientation.x != 0
-							&& hmdAlignOrientation.y != 0 && hmdAlignOrientation.z != 0)
+                    if (GetTrackedDevicePose(hmd_device_index, &openvr_hmd_pose_meters))
+                    {
+                        // Convert the HMD pose that's in OpenVR tracking space into PSM tracking space.
+                        // The HMD alignment calibration already gave us the tracking space conversion.
+                        const PSMPosef psmToOpenVRPose= GetWorldFromDriverPose();
+                        const PSMPosef openVRToPsmPose= PSM_PosefInverse(&psmToOpenVRPose);
+                        PSMPosef psm_hmd_pose_meters= PSM_PosefConcat(&openvr_hmd_pose_meters, &openVRToPsmPose);
+                        
+						if (!useOnlyYawForVirutalTrackerWithHMDOrientation)
+							orientation= m_orientationSolver->solveHandOrientation(psm_hmd_pose_meters, psm_hand_position_meters);
+						else
 						{
-							alignOrientationForMPU = PSM_QuatfNormalizeWithDefault(&PSM_QuatfCreate(
-								orientationFromQuaternion.w,
-								orientationFromQuaternion.x,
-								orientationFromQuaternion.y,
-								orientationFromQuaternion.z), k_psm_quaternion_identity);
-						}
+							PSMQuatf normalizedOrientation = PSM_QuatfNormalizeWithDefault(&psm_hmd_pose_meters.Orientation, k_psm_quaternion_identity);
 
-						PSMQuatf differenceBetweenHmdAndAlignMPU = PSM_QuatfMultiply(&hmdAlignOrientation, &PSM_QuatfConjugate(&alignOrientationForMPU));
-						PSMQuatf orientationWithOffset = PSM_QuatfMultiply(&differenceBetweenHmdAndAlignMPU, &orientationFromQuaternion);
-						orientation = PSM_QuatfNormalizeWithDefault(&orientationWithOffset, k_psm_quaternion_identity);
-						lastJson = j_string;
-						//orientation = PSM_QuatfNormalizeWithDefault(&quaternionWithOrientation, k_psm_quaternion_identity);
-					}
-				}
-			}
-			catch (std::exception& e)
+							float mag = sqrt(normalizedOrientation.w * normalizedOrientation.w + normalizedOrientation.y * normalizedOrientation.y);
+
+							PSMQuatf orientationWithOnlyYaw = PSM_QuatfCreate(
+								(float)normalizedOrientation.w / mag,
+								(float)0,
+								(float)normalizedOrientation.y / mag,
+								(float)0);
+
+							orientation = orientationWithOnlyYaw;
+						}
+                    }
+                }
+            }
+
+			//Accelerometer for now there is also update from accel
+			if (useSerialAccelerometer && serialAccelerometer != NULL)
 			{
-				try
+				serialAccelerometer->UpdateAccelerometerData();
+				PSMQuatf orientationFromQuaternion = serialAccelerometer->GetAccelerometerQuaternion();
+
+				if (alignOrientationForMPU.w == 1 && alignOrientationForMPU.x == 0
+					&& alignOrientationForMPU.y == 0 && alignOrientationForMPU.z == 0
+					&& hmdAlignOrientation.w != 1 && hmdAlignOrientation.x != 0
+					&& hmdAlignOrientation.y != 0 && hmdAlignOrientation.z != 0)
 				{
-					DriverLog("COM not connected");
-					SP = new Serial("\\\\.\\COM5");
+					alignOrientationForMPU = PSM_QuatfNormalizeWithDefault(&PSM_QuatfCreate(
+						orientationFromQuaternion.w,
+						orientationFromQuaternion.x,
+						orientationFromQuaternion.y,
+						orientationFromQuaternion.z), k_psm_quaternion_identity);
 				}
-				catch (std::exception& e)
-				{
-					DriverLog("Error COM connecting");
-				}
+
+				PSMQuatf differenceBetweenHmdAndAlignMPU = PSM_QuatfMultiply(&hmdAlignOrientation, &PSM_QuatfConjugate(&alignOrientationForMPU));
+				PSMQuatf orientationWithOffset = PSM_QuatfMultiply(&differenceBetweenHmdAndAlignMPU, &orientationFromQuaternion);
+				orientation = PSM_QuatfNormalizeWithDefault(&orientationWithOffset, k_psm_quaternion_identity);
 			}
-			//END Test
+
+			//End Accelerometer
 
             // Set rotational coordinates
             m_Pose.qRotation.w = m_fVirtuallyRotateController ? -orientation.w : orientation.w;

@@ -11,6 +11,8 @@
 
 #include "PSMoveClient_CAPI.h"
 
+#include "SerialAccelerometer.h"
+
 //-- pre-declarations -----
 class CPSMoveTrackedDeviceLatest;
 
@@ -392,6 +394,12 @@ private:
 
     // Callbacks
     static void start_controller_response_callback(const PSMResponseMessage *response, void *userdata);
+
+	SerialAccelerometer *serialAccelerometer;
+	PSMQuatf hmdAlignOrientation;
+	PSMQuatf alignOrientationForMPU;
+	bool useOnlyYawForVirutalTrackerWithHMDOrientation;
+	bool useSerialAccelerometer;
 };
 
 class CPSMoveTrackerLatest : public CPSMoveTrackedDeviceLatest
