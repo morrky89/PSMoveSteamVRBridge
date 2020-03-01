@@ -33,35 +33,46 @@
 using json = nlohmann::json;
 #include <exception>
 
-static Serial* SP = new Serial("\\\\.\\COM12");
+static Serial* SP = new Serial("\\\\.\\COM5"); //COM4 - my bluetooth COM
 std::string messageFromSerialPort = "";
 std::string lastGoodMessageFromSerialPort = "";
 bool isStartRecieved = false;
 json lastJson = NULL;
 PSMQuatf hmdAlignOrientation = *k_psm_quaternion_identity;
 PSMQuatf alignOrientationForMPU = *k_psm_quaternion_identity;
+char atCommand[4] = "AT";
 
 void getDataFromSerialPort(char res)
 {
+	if (res == '\0')
+		return;
+
 	if (res == '{' && isStartRecieved == false)
 	{
+		messageFromSerialPort = "";
+		messageFromSerialPort.clear();
 		isStartRecieved = true;
 		messageFromSerialPort += res;
 	}
 	else if (res == '}' && isStartRecieved == true)
 	{
 		messageFromSerialPort += res;
-		lastGoodMessageFromSerialPort = messageFromSerialPort.c_str();
+		lastGoodMessageFromSerialPort.clear();
+		//lastGoodMessageFromSerialPort = messageFromSerialPort.c_str();
 		//printf("%s\n", lastGoodMessageFromSerialPort.c_str());
+		for (int i = 0; i < messageFromSerialPort.size(); i++)
+			lastGoodMessageFromSerialPort.push_back(messageFromSerialPort[i]);
 
+		//lastGoodMessageFromSerialPort = "";
 		messageFromSerialPort.clear();
 		isStartRecieved = false;
 	}
 	else if (res == '{' && isStartRecieved == true)
 	{
-		messageFromSerialPort += res;
+		//lastGoodMessageFromSerialPort = "";
 		messageFromSerialPort.clear();
-		isStartRecieved = false;
+		messageFromSerialPort += res;
+		//isStartRecieved = false;
 	}
 	else if (isStartRecieved == true)
 		messageFromSerialPort += res;
@@ -3601,15 +3612,27 @@ void CPSMoveControllerLatest::UpdateTrackingState()
 
 			//TEST serial data read
 
-			if (getPSMControllerSerialNo() == "VIRTUALCONTROLLER_")
+			//if (getPSMControllerSerialNo() == "VIRTUALCONTROLLER_")
+			try
 			{
 				if (SP->IsConnected())
 				{
+					//SP->WriteData(atCommand, 4);
+
 					char incomingData[256] = "";
 					int dataLength = 255;
 					int readResult = 0;
 
 					readResult = SP->ReadData(incomingData, dataLength);
+					//std::string s = std::to_string(readResult);
+					//DriverLog(s.c_str());
+
+					if (readResult == 0)
+					{
+						char atCommand[4] = "AT";
+						SP->WriteData(atCommand, 4);
+					}
+
 					incomingData[readResult] = 0;
 
 					for each (char var in incomingData)
@@ -3617,14 +3640,27 @@ void CPSMoveControllerLatest::UpdateTrackingState()
 						getDataFromSerialPort(var);
 					}
 				}
+				else
+				{
+					try
+					{
+						DriverLog("COM not connected");
+						SP = new Serial("\\\\.\\COM5");
+					}
+					catch (std::exception& e)
+					{
+						DriverLog("Error COM connecting");
+					}
+				}
 
-				if (lastGoodMessageFromSerialPort != "")
+				if (lastGoodMessageFromSerialPort.length() > 1)
 				{
 					json j_string = NULL;
 
 					try
 					{
-						j_string = json::parse(lastGoodMessageFromSerialPort);
+						j_string = json::parse(lastGoodMessageFromSerialPort.c_str());
+						//DriverLog(lastGoodMessageFromSerialPort.c_str());
 					}
 					catch (std::exception& e)
 					{
@@ -3667,6 +3703,18 @@ void CPSMoveControllerLatest::UpdateTrackingState()
 						lastJson = j_string;
 						//orientation = PSM_QuatfNormalizeWithDefault(&quaternionWithOrientation, k_psm_quaternion_identity);
 					}
+				}
+			}
+			catch (std::exception& e)
+			{
+				try
+				{
+					DriverLog("COM not connected");
+					SP = new Serial("\\\\.\\COM5");
+				}
+				catch (std::exception& e)
+				{
+					DriverLog("Error COM connecting");
 				}
 			}
 			//END Test
