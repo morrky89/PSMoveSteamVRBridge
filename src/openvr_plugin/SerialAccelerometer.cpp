@@ -89,7 +89,7 @@ void SerialAccelerometer::UpdateAccelerometerData()
 			}
 			catch (std::exception& e)
 			{
-				throw new std::exception("Not connected to COM");
+				throw;
 			}
 		}
 	}

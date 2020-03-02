@@ -187,6 +187,7 @@ static const char *k_VRTouchpadDirectionNames[k_max_vr_touchpad_directions] = {
 
 CServerDriver_PSMoveService g_ServerTrackedDeviceProvider;
 CWatchdogDriver_PSMoveService g_WatchdogDriverPSMoveService;
+PSMQuatf hmdAlignOrientation = *k_psm_quaternion_identity;
 
 //==================================================================================================
 // Logging helpers
@@ -1366,8 +1367,8 @@ void CServerDriver_PSMoveService::SetHMDTrackingSpace(
     for (auto it = m_vecTrackedDevices.begin(); it != m_vecTrackedDevices.end(); ++it)
     {
         CPSMoveTrackedDeviceLatest *pDevice = *it;
-
         pDevice->RefreshWorldFromDriverPose();
+		pDevice->AlignOrientationForMPU = *k_psm_quaternion_identity;
     }
 }
 
@@ -1649,6 +1650,7 @@ void CServerDriver_PSMoveService::LaunchPSMoveMonitor()
 CPSMoveTrackedDeviceLatest::CPSMoveTrackedDeviceLatest()
     : m_ulPropertyContainer(vr::k_ulInvalidPropertyContainer)
     , m_unSteamVRTrackedDeviceId(vr::k_unTrackedDeviceIndexInvalid)
+	, AlignOrientationForMPU(*k_psm_quaternion_identity)
 {
     memset(&m_Pose, 0, sizeof(m_Pose));
     m_Pose.result = vr::TrackingResult_Uninitialized;
@@ -1827,14 +1829,12 @@ CPSMoveControllerLatest::CPSMoveControllerLatest(
     , m_hmdAlignPSButtonID(k_EPSButtonID_Select)
     , m_overrideModel("")
     , m_orientationSolver(nullptr)
-	, hmdAlignOrientation(*k_psm_quaternion_identity)
-	, alignOrientationForMPU(*k_psm_quaternion_identity)
 	, useOnlyYawForVirutalTrackerWithHMDOrientation(false)
+	, useSerialAccelerometer(false)
 {
     char svrIdentifier[256];
     GenerateControllerSteamVRIdentifier(svrIdentifier, sizeof(svrIdentifier), psmControllerId);
     m_strSteamVRSerialNo = svrIdentifier;
-
 	m_lastTouchpadPressTime = std::chrono::high_resolution_clock::now();
 
 	if (psmSerialNo != NULL) {
@@ -3254,8 +3254,7 @@ void CPSMoveControllerLatest::RealignHMDTrackingSpace()
 		hmd_pose_meters.Orientation.x,
 		hmd_pose_meters.Orientation.y,
 		hmd_pose_meters.Orientation.z);
-
-	alignOrientationForMPU = *k_psm_quaternion_identity;
+	DriverLog("hmdAlignOrientation: %d %d \n", hmdAlignOrientation.w, hmdAlignOrientation.x);
 
 	// Make the HMD orientation only contain a yaw
 	hmd_pose_meters.Orientation = ExtractHMDYawQuaternion(hmd_pose_meters.Orientation);
@@ -3595,26 +3594,33 @@ void CPSMoveControllerLatest::UpdateTrackingState()
 			//Accelerometer for now there is also update from accel
 			if (useSerialAccelerometer && serialAccelerometer != NULL)
 			{
-				serialAccelerometer->UpdateAccelerometerData();
-				PSMQuatf orientationFromQuaternion = serialAccelerometer->GetAccelerometerQuaternion();
-
-				if (alignOrientationForMPU.w == 1 && alignOrientationForMPU.x == 0
-					&& alignOrientationForMPU.y == 0 && alignOrientationForMPU.z == 0
-					&& hmdAlignOrientation.w != 1 && hmdAlignOrientation.x != 0
-					&& hmdAlignOrientation.y != 0 && hmdAlignOrientation.z != 0)
+				try
 				{
-					alignOrientationForMPU = PSM_QuatfNormalizeWithDefault(&PSM_QuatfCreate(
-						orientationFromQuaternion.w,
-						orientationFromQuaternion.x,
-						orientationFromQuaternion.y,
-						orientationFromQuaternion.z), k_psm_quaternion_identity);
+					serialAccelerometer->UpdateAccelerometerData();
+					PSMQuatf orientationFromQuaternion = serialAccelerometer->GetAccelerometerQuaternion();
+
+					if (AlignOrientationForMPU.w == 1 && AlignOrientationForMPU.x == 0
+						&& AlignOrientationForMPU.y == 0 && AlignOrientationForMPU.z == 0
+						&& hmdAlignOrientation.w != 1 && hmdAlignOrientation.x != 0
+						&& hmdAlignOrientation.y != 0 && hmdAlignOrientation.z != 0)
+					{
+						AlignOrientationForMPU = PSM_QuatfNormalizeWithDefault(&PSM_QuatfCreate(
+							orientationFromQuaternion.w,
+							orientationFromQuaternion.x,
+							orientationFromQuaternion.y,
+							orientationFromQuaternion.z), k_psm_quaternion_identity);
+						DriverLog("alignOrientationForMPU: %d %d \n", AlignOrientationForMPU.w, AlignOrientationForMPU.x);
+					}
+
+					PSMQuatf differenceBetweenHmdAndAlignMPU = PSM_QuatfMultiply(&hmdAlignOrientation, &PSM_QuatfConjugate(&AlignOrientationForMPU));
+					PSMQuatf orientationWithOffset = PSM_QuatfMultiply(&differenceBetweenHmdAndAlignMPU, &orientationFromQuaternion);
+					orientation = PSM_QuatfNormalizeWithDefault(&orientationWithOffset, k_psm_quaternion_identity);
 				}
-
-				PSMQuatf differenceBetweenHmdAndAlignMPU = PSM_QuatfMultiply(&hmdAlignOrientation, &PSM_QuatfConjugate(&alignOrientationForMPU));
-				PSMQuatf orientationWithOffset = PSM_QuatfMultiply(&differenceBetweenHmdAndAlignMPU, &orientationFromQuaternion);
-				orientation = PSM_QuatfNormalizeWithDefault(&orientationWithOffset, k_psm_quaternion_identity);
+				catch (std::exception& e)
+				{
+					DriverLog("Lost connection to COM");
+				}
 			}
-
 			//End Accelerometer
 
             // Set rotational coordinates

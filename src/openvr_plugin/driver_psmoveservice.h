@@ -124,7 +124,7 @@ public:
     virtual void RefreshWorldFromDriverPose();
     PSMPosef GetWorldFromDriverPose();
     virtual const char *GetSteamVRIdentifier() const;
-
+	PSMQuatf AlignOrientationForMPU;
 protected:
 	vr::PropertyContainerHandle_t m_ulPropertyContainer;
 
@@ -257,7 +257,6 @@ public:
 	inline const PSMController * getPSMControllerView() const { return m_PSMControllerView; }
 	inline std::string getPSMControllerSerialNo() const { return m_strPSMControllerSerialNo; }
 	inline PSMControllerType getPSMControllerType() const { return m_PSMControllerType; }
-
 private:
     typedef void ( vr::IVRServerDriverHost::*ButtonUpdate )( uint32_t unWhichDevice, vr::EVRButtonId eButtonId, double eventTimeOffset );
 
@@ -396,8 +395,6 @@ private:
     static void start_controller_response_callback(const PSMResponseMessage *response, void *userdata);
 
 	SerialAccelerometer *serialAccelerometer;
-	PSMQuatf hmdAlignOrientation;
-	PSMQuatf alignOrientationForMPU;
 	bool useOnlyYawForVirutalTrackerWithHMDOrientation;
 	bool useSerialAccelerometer;
 };
