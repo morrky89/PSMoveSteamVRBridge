@@ -1369,6 +1369,7 @@ void CServerDriver_PSMoveService::SetHMDTrackingSpace(
         CPSMoveTrackedDeviceLatest *pDevice = *it;
         pDevice->RefreshWorldFromDriverPose();
 		pDevice->AlignOrientationForMPU = *k_psm_quaternion_identity;
+		DriverLog("alignOrientationForMPU: identity");
     }
 }
 
@@ -1829,8 +1830,9 @@ CPSMoveControllerLatest::CPSMoveControllerLatest(
     , m_hmdAlignPSButtonID(k_EPSButtonID_Select)
     , m_overrideModel("")
     , m_orientationSolver(nullptr)
-	, useOnlyYawForVirutalTrackerWithHMDOrientation(false)
+	, useOnlyYawForVirtualTrackerWithHMDOrientation(false)
 	, useSerialAccelerometer(false)
+	, disableExtendForAccelerometerDevices(false)
 {
     char svrIdentifier[256];
     GenerateControllerSteamVRIdentifier(svrIdentifier, sizeof(svrIdentifier), psmControllerId);
@@ -2101,11 +2103,12 @@ CPSMoveControllerLatest::CPSMoveControllerLatest(
 				m_orientationSolver = new CFacingHandOrientationSolver;
 			}
 
-			useOnlyYawForVirutalTrackerWithHMDOrientation = LoadBool(pSettings, "virtual_controller_settings", "use_only_yaw_for_orientation_from_hmd", false);
+			useOnlyYawForVirtualTrackerWithHMDOrientation = LoadBool(pSettings, "virtual_controller_settings", "use_only_yaw_for_orientation_from_hmd", false);
 
 			std::string controllerFlag = "controller_" + std::to_string(m_nPSMControllerId) + "_use_serial_accelerometer";
 			useSerialAccelerometer = LoadBool(pSettings, "virtual_controller_settings", controllerFlag.c_str(), false);
-			
+			disableExtendForAccelerometerDevices = LoadBool(pSettings, "virtual_controller_settings", "disableExtendForAccelerometerDevices", false);
+
 			if (useSerialAccelerometer)
 			{
 				char comPort[32];
@@ -2117,7 +2120,14 @@ CPSMoveControllerLatest::CPSMoveControllerLatest(
 				std::string controllerBlueToothFlag = "controller_" + std::to_string(m_nPSMControllerId) + "_init_bluetooth_with_at_command";
 				float initBluetoothWithATCommand = LoadBool(pSettings, "virtual_controller_settings", controllerBlueToothFlag.c_str(), false);
 
-				serialAccelerometer = new SerialAccelerometer(comPort, initBluetoothWithATCommand);
+				/*try
+				{*/
+					serialAccelerometer = new SerialAccelerometer(comPort, initBluetoothWithATCommand);
+				//}
+				//catch (std::exception& ex)
+				//{
+				//	DriverLog("Failed to init SerialAccelerometer  %s", comPort);
+				//}
 			}
 		}
 	}
@@ -3254,11 +3264,17 @@ void CPSMoveControllerLatest::RealignHMDTrackingSpace()
 		hmd_pose_meters.Orientation.x,
 		hmd_pose_meters.Orientation.y,
 		hmd_pose_meters.Orientation.z);
-	DriverLog("hmdAlignOrientation: %d %d \n", hmdAlignOrientation.w, hmdAlignOrientation.x);
 
 	// Make the HMD orientation only contain a yaw
 	hmd_pose_meters.Orientation = ExtractHMDYawQuaternion(hmd_pose_meters.Orientation);
 	DriverLog("hmd_pose_meters(yaw-only): %s \n", PSMPosefToString(hmd_pose_meters).c_str());
+
+	/*hmdAlignOrientation = PSM_QuatfCreate(
+		hmd_pose_meters.Orientation.w,
+		hmd_pose_meters.Orientation.x,
+		hmd_pose_meters.Orientation.y,
+		hmd_pose_meters.Orientation.z);*/
+	DriverLog("hmdAlignOrientation: %d %d \n", hmdAlignOrientation.w, hmdAlignOrientation.x);
 
 	// We have the transform of the HMD in world space. 
 	// However the HMD and the controller aren't quite aligned depending on the controller type:
@@ -3571,7 +3587,7 @@ void CPSMoveControllerLatest::UpdateTrackingState()
                         const PSMPosef openVRToPsmPose= PSM_PosefInverse(&psmToOpenVRPose);
                         PSMPosef psm_hmd_pose_meters= PSM_PosefConcat(&openvr_hmd_pose_meters, &openVRToPsmPose);
                         
-						if (!useOnlyYawForVirutalTrackerWithHMDOrientation)
+						if (!useOnlyYawForVirtualTrackerWithHMDOrientation)
 							orientation= m_orientationSolver->solveHandOrientation(psm_hmd_pose_meters, psm_hand_position_meters);
 						else
 						{
@@ -3598,22 +3614,23 @@ void CPSMoveControllerLatest::UpdateTrackingState()
 				{
 					serialAccelerometer->UpdateAccelerometerData();
 					PSMQuatf orientationFromQuaternion = serialAccelerometer->GetAccelerometerQuaternion();
+					PSMQuatf normalizedOrientationFromQuaternion = PSM_QuatfNormalizeWithDefault(&orientationFromQuaternion, k_psm_quaternion_identity);
 
 					if (AlignOrientationForMPU.w == 1 && AlignOrientationForMPU.x == 0
 						&& AlignOrientationForMPU.y == 0 && AlignOrientationForMPU.z == 0
-						&& hmdAlignOrientation.w != 1 && hmdAlignOrientation.x != 0
-						&& hmdAlignOrientation.y != 0 && hmdAlignOrientation.z != 0)
+						&& (hmdAlignOrientation.w != 1 | hmdAlignOrientation.x != 0
+						| hmdAlignOrientation.y != 0 | hmdAlignOrientation.z != 0))
 					{
-						AlignOrientationForMPU = PSM_QuatfNormalizeWithDefault(&PSM_QuatfCreate(
-							orientationFromQuaternion.w,
-							orientationFromQuaternion.x,
-							orientationFromQuaternion.y,
-							orientationFromQuaternion.z), k_psm_quaternion_identity);
+						AlignOrientationForMPU = PSM_QuatfCreate(
+							normalizedOrientationFromQuaternion.w,
+							normalizedOrientationFromQuaternion.x,
+							normalizedOrientationFromQuaternion.y,
+							normalizedOrientationFromQuaternion.z);
 						DriverLog("alignOrientationForMPU: %d %d \n", AlignOrientationForMPU.w, AlignOrientationForMPU.x);
 					}
 
 					PSMQuatf differenceBetweenHmdAndAlignMPU = PSM_QuatfMultiply(&hmdAlignOrientation, &PSM_QuatfConjugate(&AlignOrientationForMPU));
-					PSMQuatf orientationWithOffset = PSM_QuatfMultiply(&differenceBetweenHmdAndAlignMPU, &orientationFromQuaternion);
+					PSMQuatf orientationWithOffset = PSM_QuatfMultiply(&normalizedOrientationFromQuaternion, &differenceBetweenHmdAndAlignMPU);
 					orientation = PSM_QuatfNormalizeWithDefault(&orientationWithOffset, k_psm_quaternion_identity);
 				}
 				catch (std::exception& e)
@@ -3630,7 +3647,7 @@ void CPSMoveControllerLatest::UpdateTrackingState()
             m_Pose.qRotation.z = m_fVirtuallyRotateController ? -orientation.z : orientation.z;
 
 			// virtual extend controller position
-			if (m_fVirtuallExtendControllersYMeters != 0.0f || m_fVirtuallExtendControllersZMeters != 0.0f)
+			if (!useSerialAccelerometer && (m_fVirtuallExtendControllersYMeters != 0.0f || m_fVirtuallExtendControllersZMeters != 0.0f))
 			{
 				PSMVector3f shift = {(float)m_Pose.vecPosition[0], (float)m_Pose.vecPosition[1], (float)m_Pose.vecPosition[2]};
 

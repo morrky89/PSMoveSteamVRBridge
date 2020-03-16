@@ -395,8 +395,9 @@ private:
     static void start_controller_response_callback(const PSMResponseMessage *response, void *userdata);
 
 	SerialAccelerometer *serialAccelerometer;
-	bool useOnlyYawForVirutalTrackerWithHMDOrientation;
+	bool useOnlyYawForVirtualTrackerWithHMDOrientation;
 	bool useSerialAccelerometer;
+	bool disableExtendForAccelerometerDevices;
 };
 
 class CPSMoveTrackerLatest : public CPSMoveTrackedDeviceLatest
