@@ -11,13 +11,7 @@ SerialAccelerometer::SerialAccelerometer(std::string initComPort, bool initBluet
 	COMPort = initComPort;
 	InitWithBluetoothATCommand = initBluetoothWithATCommand;
 
-	try
-	{
-		SerialPort = new Serial(COMPort.c_str());
-	}
-	catch (std::exception& e)
-	{
-	}
+	SerialPort = new Serial(COMPort.c_str());
 
 	messageFromSerialPort = "";
 	lastGoodMessageFromSerialPort = "";
@@ -60,10 +54,10 @@ void SerialAccelerometer::UpdateAccelerometerData()
 {
 	try
 	{
-		if (SerialPort->IsConnected())
+		if (IsConnected())
 		{
-			char incomingData[256] = "";
-			int dataLength = 255;
+			char incomingData[64] = "";
+			int dataLength = 63;
 			int readResult = 0;
 
 			readResult = SerialPort->ReadData(incomingData, dataLength);
@@ -72,6 +66,20 @@ void SerialAccelerometer::UpdateAccelerometerData()
 			{
 				if (InitWithBluetoothATCommand)
 					SerialPort->WriteData(BluetoothAtCommand, 4);
+
+				readResultZero++;
+
+				if (readResultZero >= 50)
+				{
+					IsConnectionLost = true;
+					SerialPort->CloseCom();
+					readResultZero = 0;
+				}
+			}
+			else
+			{
+				InitWithBluetoothATCommand = false;
+				readResultZero = 0;
 			}
 
 			incomingData[readResult] = 0;
@@ -83,26 +91,14 @@ void SerialAccelerometer::UpdateAccelerometerData()
 		}
 		else
 		{
-			try
-			{
-				SerialPort = new Serial(COMPort.c_str());
-			}
-			catch (std::exception& e)
-			{
-				throw;
-			}
+			SerialPort = new Serial(COMPort.c_str());
+			IsConnectionLost = false;
+			InitWithBluetoothATCommand = true;
 		}
 	}
 	catch (std::exception& e)
 	{
-		try
-		{
-			SerialPort = new Serial(COMPort.c_str());
-		}
-		catch (std::exception& e)
-		{
-			throw new std::exception("Not connected to COM");
-		}
+		IsConnectionLost = true;
 	}
 }
 
@@ -126,14 +122,20 @@ PSMQuatf SerialAccelerometer::GetAccelerometerQuaternion()
 
 		if (j_string != NULL)
 		{
-			auto qx = j_string["QX"].get<float>();
-			auto qy = j_string["QY"].get<float>();
-			auto qz = j_string["QZ"].get<float>();
-			auto qw = j_string["QW"].get<float>();
+			auto qx = j_string["X"].get<float>();
+			auto qy = j_string["Y"].get<float>();
+			auto qz = j_string["Z"].get<float>();
+			auto qw = j_string["W"].get<float>();
 
 			lastJson = j_string;
 
 			return PSM_QuatfCreate(qw, qy, qz, qx);
 		}
 	}
+	return PSM_QuatfCreate(1, 0, 0 ,0);
+}
+
+bool SerialAccelerometer::IsConnected()
+{
+	return SerialPort->IsConnected() && !IsConnectionLost;
 }

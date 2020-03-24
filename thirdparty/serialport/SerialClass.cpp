@@ -18,16 +18,16 @@ Serial::Serial(const char *portName)
 	if (this->hSerial == INVALID_HANDLE_VALUE)
 	{
 		//If not success full display an Error
-		if (GetLastError() == ERROR_FILE_NOT_FOUND) {
+		//if (GetLastError() == ERROR_FILE_NOT_FOUND) {
 
-			//Print Error if neccessary
-			printf("ERROR: Handle was not attached. Reason: %s not available.\n", portName);
+		//	//Print Error if neccessary
+		//	printf("ERROR: Handle was not attached. Reason: %s not available.\n", portName);
 
-		}
-		else
-		{
-			printf("ERROR!!!");
-		}
+		//}
+		//else
+		//{
+		//	printf("ERROR!!!");
+		//}
 	}
 	else
 	{
@@ -78,6 +78,15 @@ Serial::~Serial()
 		//We're no longer connected
 		this->connected = false;
 		//Close the serial handler
+		CloseHandle(this->hSerial);
+	}
+}
+
+void Serial::CloseCom()
+{
+	if (this->connected)
+	{
+		this->connected = false;
 		CloseHandle(this->hSerial);
 	}
 }

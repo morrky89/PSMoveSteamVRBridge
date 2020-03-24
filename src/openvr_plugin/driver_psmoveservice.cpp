@@ -3601,14 +3601,14 @@ void CPSMoveControllerLatest::UpdateTrackingState()
 								(float)normalizedOrientation.y / mag,
 								(float)0);
 
-							orientation = orientationWithOnlyYaw;
+							//orientation = orientationWithOnlyYaw;
 						}
                     }
                 }
             }
 
 			//Accelerometer for now there is also update from accel
-			if (useSerialAccelerometer && serialAccelerometer != NULL)
+			if (useSerialAccelerometer && serialAccelerometer != NULL && serialAccelerometer->IsConnected())
 			{
 				try
 				{
@@ -3655,8 +3655,10 @@ void CPSMoveControllerLatest::UpdateTrackingState()
 
 					PSMVector3f local_forward = {0, 0, -1};
 					PSMVector3f global_forward = PSM_QuatfRotateVector(&orientation, &local_forward);
-
+					
 					shift = PSM_Vector3fScaleAndAdd(&global_forward, m_fVirtuallExtendControllersZMeters, &shift);
+
+					//shift = PSM_Vector3fScale(&shift, 0.9);
 				}
 
 				if (m_fVirtuallExtendControllersYMeters != 0.0f) {
@@ -3666,6 +3668,7 @@ void CPSMoveControllerLatest::UpdateTrackingState()
 
 					shift = PSM_Vector3fScaleAndAdd(&global_forward, m_fVirtuallExtendControllersYMeters, &shift);
 				}
+
 
 				m_Pose.vecPosition[0] = shift.x;
 				m_Pose.vecPosition[1] = shift.y;
